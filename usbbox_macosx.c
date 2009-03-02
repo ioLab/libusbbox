@@ -103,7 +103,7 @@ static void set_last_error(int err) {
     _last_error=err;
 }
 
-static void message_callback(void *arg, IOReturn result, void *refcon, void *sender, UInt32 size) {
+static void message_callback(void *arg, IOReturn result, void *refcon, void *sender, uint32_t size) {
     usb_box_macosx* box = (usb_box_macosx*)arg;
     usb_box_message msg;
     memcpy(msg, box->buffer, sizeof(usb_box_message));
@@ -314,6 +314,8 @@ long time_diff_micro(struct timeval begin, struct timeval end) {
 
 /*
  * try to read a message from the box.  
+ * use a timeout of 0 to return immediately (polling).
+ * 
  * 0 indicates the message was read successfully within
  * timeout milliseconds into the usb_box_message passed into
  * the function.
@@ -322,16 +324,28 @@ long time_diff_micro(struct timeval begin, struct timeval end) {
  */
 EXPORT int usb_box_read(usb_box box, usb_box_message* msg_ptr, int timeout) {
     if ( box ) {
-        int result = -1;
+        usb_box_macosx* osx_box = (usb_box_macosx*)box;
+        int result = -1, repeat=0;
         struct timeval begin, end;
-        gettimeofday(&begin, NULL);
         do {
-            usb_box_macosx* osx_box = (usb_box_macosx*)box;
             result = pop_msg(osx_box, msg_ptr);
-            gettimeofday(&end, NULL);
             if ( result != 0 ) {
+                /* nothing on the queue */
+                if ( timeout <= 0 ) {
+                    /* special case, no timeout, so just quit
+                       the loop straight away. */
+                    break;
+                }
+                
+                /*otherwise we'll update the time and sleep for a little while*/
+                if (!repeat) {
+                    /* first time through */
+                    gettimeofday(&begin, NULL);
+                }
+                gettimeofday(&end, NULL);
                 /* yield */
                 usleep(100);
+                repeat++;
             }
         }
         while( result != 0 && time_diff_micro(begin,end) < (timeout*1000) );
